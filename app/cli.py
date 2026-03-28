@@ -45,6 +45,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum number of output tokens to generate.",
     )
     parser.add_argument(
+        "--chunk-token-limit",
+        dest="chunk_token_limit",
+        type=int,
+        help="Token limit for chunking long texts before translation.",
+    )
+    parser.add_argument(
+        "--chunk-overlap-tokens",
+        dest="chunk_overlap_tokens",
+        type=int,
+        help="Token overlap between adjacent chunks for long-text translation.",
+    )
+    parser.add_argument(
         "--num-beams",
         dest="num_beams",
         type=int,
@@ -96,6 +108,10 @@ def merge_cli_with_env(args: argparse.Namespace) -> AppConfig:
         config.max_input_length = args.max_input_length
     if args.max_new_tokens is not None:
         config.max_new_tokens = args.max_new_tokens
+    if args.chunk_token_limit is not None:
+        config.chunk_token_limit = args.chunk_token_limit
+    if args.chunk_overlap_tokens is not None:
+        config.chunk_overlap_tokens = args.chunk_overlap_tokens
     if args.num_beams is not None:
         config.num_beams = args.num_beams
     if args.skip_url_like is not None:

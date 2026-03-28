@@ -50,7 +50,9 @@ class AppConfig:
     report_path: Path | None = None
 
     max_input_length: int = 512
+    chunk_token_limit: int = 160
     max_new_tokens: int = 512
+    chunk_overlap_tokens: int = 0
     num_beams: int = 1
     skip_url_like: bool = True
 
@@ -63,7 +65,7 @@ class AppConfig:
     def from_env(cls) -> "AppConfig":
         input_path = Path(_get_env_str("INPUT_PATH", "data/input/input.csv"))
         output_path = Path(_get_env_str("OUTPUT_PATH", "data/output/output.csv"))
-        
+
         model_name = os.getenv("MODEL_NAME")
         if model_name is not None:
             model_name = model_name.strip() or None
@@ -90,7 +92,9 @@ class AppConfig:
         report_path = Path(report_path_env) if report_path_env else None
 
         max_input_length = _get_env_int("MAX_INPUT_LENGTH", 512)
+        chunk_token_limit = _get_env_int("CHUNK_TOKEN_LIMIT", 160)
         max_new_tokens = _get_env_int("MAX_NEW_TOKENS", 512)
+        chunk_overlap_tokens = _get_env_int("CHUNK_OVERLAP_TOKENS", 0)
         num_beams = _get_env_int("NUM_BEAMS", 1)
         skip_url_like = _get_env_bool("SKIP_URL_LIKE", True)
 
@@ -107,7 +111,9 @@ class AppConfig:
             target_lang=target_lang,
             report_path=report_path,
             max_input_length=max_input_length,
+            chunk_token_limit=chunk_token_limit,
             max_new_tokens=max_new_tokens,
+            chunk_overlap_tokens=chunk_overlap_tokens,
             num_beams=num_beams,
             skip_url_like=skip_url_like,
         )
@@ -136,8 +142,20 @@ class AppConfig:
         if self.max_input_length <= 0:
             raise ValueError("max_input_length must be greater than 0.")
 
+        if self.chunk_token_limit <= 0:
+            raise ValueError("chunk_token_limit must be greater than 0.")
+
+        if self.chunk_token_limit > self.max_input_length:
+            raise ValueError("chunk_token_limit must not exceed max_input_length.")
+
         if self.max_new_tokens <= 0:
             raise ValueError("max_new_tokens must be greater than 0.")
+        
+        if self.chunk_overlap_tokens < 0:
+            raise ValueError("chunk_overlap_tokens must be non-negative.")
+
+        if self.chunk_overlap_tokens >= self.chunk_token_limit:
+            raise ValueError("chunk_overlap_tokens must be smaller than chunk_token_limit.")
 
         if self.num_beams <= 0:
             raise ValueError("num_beams must be greater than 0.")

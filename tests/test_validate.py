@@ -138,6 +138,24 @@ def test_validate_translation_respects_precomputed_skipped_url_like_status() -> 
     assert result.error_message == "Record looks like a URL-like string and was skipped."
 
 
+def test_validate_translation_respects_precomputed_ok_chunked_status() -> None:
+    source = "hello <PERSON> verify account"
+    target = "hallo <PERSON> konto prüfen"
+
+    result = validate_translation(
+        source_text=source,
+        translated_text=target,
+        precomputed_status="ok_chunked",
+        precomputed_error_message=None,
+    )
+
+    assert result.status == "ok_chunked"
+    assert result.placeholder_ok is True
+    assert result.source_placeholders == ["<PERSON>"]
+    assert result.target_placeholders == ["<PERSON>"]
+    assert result.error_message is None
+
+
 def test_summarize_validation_counts_statuses_correctly() -> None:
     results = [
         validate_translation("hello <PERSON>", "cześć <PERSON>"),
@@ -167,3 +185,18 @@ def test_summarize_validation_counts_statuses_correctly() -> None:
     assert summary["skipped_url_like"] == 1
     assert summary["translation_error"] == 1
     assert summary["placeholder_mismatch"] == 0
+
+
+def test_summarize_validation_counts_ok_chunked_status() -> None:
+    results = [
+        validate_translation(
+            source_text="hello <PERSON>",
+            translated_text="hallo <PERSON>",
+            precomputed_status="ok_chunked",
+        ),
+    ]
+
+    summary = summarize_validation(results)
+
+    assert summary["ok_chunked"] == 1
+    assert summary["ok"] == 0

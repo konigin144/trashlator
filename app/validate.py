@@ -105,8 +105,10 @@ def validate_translation(
             error_message="Source and target placeholders do not match.",
         )
 
+    final_status = "ok_chunked" if precomputed_status == "ok_chunked" else "ok"
+
     return ValidationResult(
-        status="ok",
+        status=final_status,
         placeholder_ok=True,
         source_placeholders=source_placeholders,
         target_placeholders=target_placeholders,
@@ -117,6 +119,7 @@ def validate_translation(
 def summarize_validation(results: list[ValidationResult]) -> dict[str, int]:
     summary: dict[str, int] = {
         "ok": 0,
+        "ok_chunked": 0,
         "empty_translation": 0,
         "placeholder_mismatch": 0,
         "too_long_for_model": 0,

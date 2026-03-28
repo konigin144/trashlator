@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 from app.config import AppConfig
+from app.masking import mask_emojis, unmask_emojis
 from app.preprocess import is_url_like_text
 from app.translator import OpusTranslator
 from app.validate import validate_translation, summarize_validation
@@ -31,7 +32,9 @@ def run_pipeline(config: AppConfig) -> None:
     logger.info("Batch size: %s", config.batch_size)
     logger.info("Limit: %s", config.limit)
     logger.info("max_input_length: %s", config.max_input_length)
+    logger.info("chunk_token_limit: %s", config.chunk_token_limit)
     logger.info("max_new_tokens: %s", config.max_new_tokens)
+    logger.info("chunk_overlap_tokens: %s", config.chunk_overlap_tokens)
     logger.info("num_beams: %s", config.num_beams)
     logger.info("skip_url_like: %s", config.skip_url_like)
 
@@ -72,14 +75,21 @@ def run_pipeline(config: AppConfig) -> None:
 
     texts = df[config.text_column].tolist()
 
+    emoji_mask_results = [mask_emojis(text) for text in texts]
+    masked_texts = [result.masked_text for result in emoji_mask_results]
+    emoji_replacements = [result.replacements for result in emoji_mask_results]
+    contains_emoji_flags = [result.contains_emoji for result in emoji_mask_results]
+
+    df["flag_contains_emoji"] = contains_emoji_flags
+
     url_like_flags = [
         is_url_like_text(text) if config.skip_url_like else False
-        for text in texts
+        for text in masked_texts
     ]
     url_like_count = sum(url_like_flags)
     logger.info("Detected %d URL-like texts", url_like_count)
 
-    length_checks = translator.check_input_lengths(texts)
+    length_checks = translator.check_input_lengths(masked_texts)
     token_counts = [result.token_count for result in length_checks]
     too_long_flags = [result.is_too_long for result in length_checks]
     too_long_count = sum(too_long_flags)
@@ -92,49 +102,107 @@ def run_pipeline(config: AppConfig) -> None:
     translated_texts: list[str | None] = [None] * len(texts)
     precomputed_statuses: list[str | None] = [None] * len(texts)
     precomputed_errors: list[str | None] = [None] * len(texts)
+    was_chunked: list[bool] = [False] * len(texts)
+    chunk_counts: list[int] = [0] * len(texts)
 
     for i, is_url_like in enumerate(url_like_flags):
         if is_url_like:
             precomputed_statuses[i] = "skipped_url_like"
             precomputed_errors[i] = "Record looks like a URL-like string and was skipped."
 
-    for i, is_too_long in enumerate(too_long_flags):
-        if is_too_long and precomputed_statuses[i] is None:
-            precomputed_statuses[i] = "too_long_for_model"
-            precomputed_errors[i] = (
-                f"Input has {token_counts[i]} tokens, exceeding limit "
-                f"{translator.max_input_length}."
-            )
+    normal_indices: list[int] = []
+    long_indices: list[int] = []
 
-    valid_indices = [
-        i for i in range(len(texts))
-        if precomputed_statuses[i] is None
-    ]
-    logger.info("Texts eligible for translation: %d", len(valid_indices))
+    for i in range(len(texts)):
+        if precomputed_statuses[i] is not None:
+            continue
 
-    batches = _chunk_indices(valid_indices, config.batch_size)
+        if too_long_flags[i]:
+            long_indices.append(i)
+        else:
+            normal_indices.append(i)
 
-    for batch_no, batch_indices in enumerate(batches, start=1):
-        batch_texts = [texts[i] for i in batch_indices]
-        logger.info("Processing eligible batch %d/%d (%d records)", batch_no, len(batches), len(batch_indices))
+    logger.info("Texts eligible for normal translation: %d", len(normal_indices))
+    logger.info("Texts eligible for chunked translation: %d", len(long_indices))
+
+    normal_batches = _chunk_indices(normal_indices, config.batch_size)
+
+    for batch_no, batch_indices in enumerate(normal_batches, start=1):
+        batch_texts = [masked_texts[i] for i in batch_indices]
+        logger.info(
+            "Processing normal batch %d/%d (%d records)",
+            batch_no,
+            len(normal_batches),
+            len(batch_indices),
+        )
 
         try:
             batch_result = translator.translate_batch_with_metadata(batch_texts)
             logger.info(
-                "Completed eligible batch %d/%d in %.2fs",
+                "Completed normal batch %d/%d in %.2fs",
                 batch_no,
-                len(batches),
+                len(normal_batches),
                 batch_result.elapsed_seconds,
             )
 
             for idx, translated_text in zip(batch_indices, batch_result.translations):
-                translated_texts[idx] = translated_text
+                translated_texts[idx] = unmask_emojis(
+                    translated_text,
+                    emoji_replacements[idx],
+                )
 
         except Exception as exc:
-            logger.exception("Translation failed for batch %d/%d", batch_no, len(batches))
+            logger.exception(
+                "Translation failed for normal batch %d/%d",
+                batch_no,
+                len(normal_batches),
+            )
             for idx in batch_indices:
                 precomputed_statuses[idx] = "translation_error"
                 precomputed_errors[idx] = f"Batch translation failed: {exc}"
+
+    for record_no, idx in enumerate(long_indices, start=1):
+        logger.info(
+            "Processing long record %d/%d (row_idx=%d token_count=%d chunk_token_limit=%d)",
+            record_no,
+            len(long_indices),
+            idx,
+            token_counts[idx],
+            config.chunk_token_limit,
+        )
+
+        try:
+            chunked_result = translator.translate_long_text(
+                masked_texts[idx],
+                chunk_token_limit=config.chunk_token_limit,
+                chunk_overlap_tokens=config.chunk_overlap_tokens,
+            )
+
+            translated_texts[idx] = unmask_emojis(
+                chunked_result.translated_text,
+                emoji_replacements[idx],
+            )
+            precomputed_statuses[idx] = "ok_chunked"
+            was_chunked[idx] = True
+            chunk_counts[idx] = chunked_result.chunk_count
+
+            logger.info(
+                "Completed long record %d/%d in %.2fs using %d chunks",
+                record_no,
+                len(long_indices),
+                chunked_result.elapsed_seconds,
+                chunked_result.chunk_count,
+            )
+
+        except Exception as exc:
+            logger.exception(
+                "Chunked translation failed for long record %d/%d (row_idx=%d)",
+                record_no,
+                len(long_indices),
+                idx,
+            )
+            precomputed_statuses[idx] = "translation_error"
+            precomputed_errors[idx] = f"Chunked translation failed: {exc}"
 
     validation_results = [
         validate_translation(
@@ -152,13 +220,9 @@ def run_pipeline(config: AppConfig) -> None:
     df["translated_text"] = translated_texts
     df["status"] = [result.status for result in validation_results]
     df["placeholder_ok"] = [result.placeholder_ok for result in validation_results]
-    df["source_placeholders"] = [
-        "|".join(result.source_placeholders) for result in validation_results
-    ]
-    df["target_placeholders"] = [
-        "|".join(result.target_placeholders) for result in validation_results
-    ]
     df["validation_error"] = [result.error_message for result in validation_results]
+    df["was_chunked"] = was_chunked
+    df["chunk_count"] = chunk_counts
     df["model_name"] = config.model_name
     df["source_lang"] = config.source_lang
     df["target_lang"] = config.target_lang
@@ -183,7 +247,9 @@ def run_pipeline(config: AppConfig) -> None:
         "source_lang": config.source_lang,
         "target_lang": config.target_lang,
         "max_input_length": config.max_input_length,
+        "chunk_token_limit": config.chunk_token_limit,
         "max_new_tokens": config.max_new_tokens,
+        "chunk_overlap_tokens": config.chunk_overlap_tokens,
         "num_beams": config.num_beams,
         "skip_url_like": config.skip_url_like,
         "rows_loaded": before_drop,
@@ -191,6 +257,7 @@ def run_pipeline(config: AppConfig) -> None:
         "rows_dropped_empty": dropped,
         "rows_too_long_for_model": too_long_count,
         "rows_skipped_url_like": url_like_count,
+        "rows_chunked": sum(was_chunked),
         "elapsed_seconds": round(elapsed, 2),
         "validation_summary": validation_summary,
         "config": {

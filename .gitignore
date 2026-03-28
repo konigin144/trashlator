@@ -215,3 +215,6 @@ data/output/
 data/input/
 data/raw/
 *.csv
+
+# Tmp
+tmp/
