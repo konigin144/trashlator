@@ -11,8 +11,11 @@ import pandas as pd
 from app.config import AppConfig
 from app.masking import mask_emojis, unmask_emojis
 from app.preprocess import is_url_like_text
+from app.qe import build_qe_columns
 from app.translator import OpusTranslator
 from app.validate import validate_translation, summarize_validation
+
+from qe.service import QEService
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,17 @@ def run_pipeline(config: AppConfig) -> None:
     logger.info("chunk_overlap_tokens: %s", config.chunk_overlap_tokens)
     logger.info("num_beams: %s", config.num_beams)
     logger.info("skip_url_like: %s", config.skip_url_like)
+    logger.info("enable_qe: %s", config.enable_qe)
+    logger.info("qe_backend: %s", config.qe_backend)
+    logger.info("qe_model_name: %s", config.qe_model_name)
+
+    qe_service = QEService.from_config(
+        enable_qe=config.enable_qe,
+        qe_backend=config.qe_backend,
+        qe_model_name=config.qe_model_name,
+        qe_high_threshold=config.qe_high_threshold,
+        qe_medium_threshold=config.qe_medium_threshold,
+    )
 
     df = pd.read_csv(
         config.input_path,
@@ -217,6 +231,16 @@ def run_pipeline(config: AppConfig) -> None:
     validation_summary = summarize_validation(validation_results)
     logger.info("Validation summary: %s", validation_summary)
 
+    qe_results = [
+        build_qe_columns(
+            qe_service=qe_service,
+            status=validation_results[i].status,
+            source_text=texts[i],
+            translated_text=translated_texts[i],
+        )
+        for i in range(len(texts))
+    ]
+
     df["translated_text"] = translated_texts
     df["status"] = [result.status for result in validation_results]
     df["placeholder_ok"] = [result.placeholder_ok for result in validation_results]
@@ -226,6 +250,12 @@ def run_pipeline(config: AppConfig) -> None:
     df["model_name"] = config.model_name
     df["source_lang"] = config.source_lang
     df["target_lang"] = config.target_lang
+
+    df["qe_score"] = [result["qe_score"] for result in qe_results]
+    df["qe_label"] = [result["qe_label"] for result in qe_results]
+    df["qe_error"] = [result["qe_error"] for result in qe_results]
+    df["qe_backend"] = [result["qe_backend"] for result in qe_results]
+    df["qe_model_name"] = [result["qe_model_name"] for result in qe_results]
 
     df.to_csv(
         config.output_path,
@@ -252,6 +282,9 @@ def run_pipeline(config: AppConfig) -> None:
         "chunk_overlap_tokens": config.chunk_overlap_tokens,
         "num_beams": config.num_beams,
         "skip_url_like": config.skip_url_like,
+        "enable_qe": config.enable_qe,
+        "qe_backend": config.qe_backend,
+        "qe_model_name": config.qe_model_name,
         "rows_loaded": before_drop,
         "rows_processed": len(df),
         "rows_dropped_empty": dropped,

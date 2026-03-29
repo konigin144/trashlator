@@ -20,16 +20,6 @@ def _get_env_int(name: str, default: int) -> int:
         raise ValueError(f"Environment variable {name} must be an integer.") from exc
 
 
-def _get_env_float(name: str, default: float) -> float:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except ValueError as exc:
-        raise ValueError(f"Environment variable {name} must be a float.") from exc
-
-
 def _get_env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -71,12 +61,6 @@ class AppConfig:
     input_encoding: str = "utf-8-sig"
     output_encoding: str = "utf-8"
 
-    enable_qe: bool = False
-    qe_backend: str | None = None
-    qe_model_name: str | None = None
-    qe_high_threshold: float = 0.7
-    qe_medium_threshold: float = 0.4
-
     @classmethod
     def from_env(cls) -> "AppConfig":
         input_path = Path(_get_env_str("INPUT_PATH", "data/input/input.csv"))
@@ -114,19 +98,6 @@ class AppConfig:
         num_beams = _get_env_int("NUM_BEAMS", 1)
         skip_url_like = _get_env_bool("SKIP_URL_LIKE", True)
 
-        enable_qe = _get_env_bool("ENABLE_QE", False)
-
-        qe_backend = os.getenv("QE_BACKEND")
-        if qe_backend is not None:
-            qe_backend = qe_backend.strip() or None
-
-        qe_model_name = os.getenv("QE_MODEL_NAME")
-        if qe_model_name is not None:
-            qe_model_name = qe_model_name.strip() or None
-
-        qe_high_threshold = _get_env_float("QE_HIGH_THRESHOLD", 0.7)
-        qe_medium_threshold = _get_env_float("QE_MEDIUM_THRESHOLD", 0.4)
-
         return cls(
             input_path=input_path,
             output_path=output_path,
@@ -145,11 +116,6 @@ class AppConfig:
             chunk_overlap_tokens=chunk_overlap_tokens,
             num_beams=num_beams,
             skip_url_like=skip_url_like,
-            enable_qe=enable_qe,
-            qe_backend=qe_backend,
-            qe_model_name=qe_model_name,
-            qe_high_threshold=qe_high_threshold,
-            qe_medium_threshold=qe_medium_threshold,
         )
 
     def validate(self) -> None:
@@ -184,41 +150,15 @@ class AppConfig:
 
         if self.max_new_tokens <= 0:
             raise ValueError("max_new_tokens must be greater than 0.")
-
+        
         if self.chunk_overlap_tokens < 0:
             raise ValueError("chunk_overlap_tokens must be non-negative.")
 
         if self.chunk_overlap_tokens >= self.chunk_token_limit:
-            raise ValueError(
-                "chunk_overlap_tokens must be smaller than chunk_token_limit."
-            )
+            raise ValueError("chunk_overlap_tokens must be smaller than chunk_token_limit.")
 
         if self.num_beams <= 0:
             raise ValueError("num_beams must be greater than 0.")
-
-        if self.enable_qe:
-            supported_qe_backends = {"transquest"}
-
-            if not self.qe_backend:
-                raise ValueError("qe_backend must be provided when enable_qe is true.")
-
-            if self.qe_backend not in supported_qe_backends:
-                raise ValueError(
-                    f"qe_backend must be one of: {sorted(supported_qe_backends)}"
-                )
-
-            if not self.qe_model_name:
-                raise ValueError(
-                    "qe_model_name must be provided when enable_qe is true."
-                )
-
-            if self.qe_medium_threshold < 0 or self.qe_high_threshold < 0:
-                raise ValueError("QE thresholds must be non-negative.")
-
-            if self.qe_medium_threshold > self.qe_high_threshold:
-                raise ValueError(
-                    "qe_medium_threshold must not be greater than qe_high_threshold."
-                )
 
     def ensure_output_dirs(self) -> None:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)

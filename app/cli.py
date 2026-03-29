@@ -76,6 +76,46 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.set_defaults(skip_url_like=None)
 
+    parser.add_argument(
+        "--enable-qe",
+        dest="enable_qe",
+        action="store_true",
+        help="Enable QE scoring for translated records.",
+    )
+    parser.add_argument(
+        "--disable-qe",
+        dest="enable_qe",
+        action="store_false",
+        help="Disable QE scoring.",
+    )
+    parser.set_defaults(enable_qe=None)
+
+    parser.add_argument(
+        "--qe-backend",
+        dest="qe_backend",
+        type=str,
+        choices=["transquest"],
+        help="QE backend to use.",
+    )
+    parser.add_argument(
+        "--qe-model-name",
+        dest="qe_model_name",
+        type=str,
+        help="Model name/path for QE backend.",
+    )
+    parser.add_argument(
+        "--qe-high-threshold",
+        dest="qe_high_threshold",
+        type=float,
+        help="High-confidence threshold for QE score.",
+    )
+    parser.add_argument(
+        "--qe-medium-threshold",
+        dest="qe_medium_threshold",
+        type=float,
+        help="Medium-confidence threshold for QE score.",
+    )
+
     return parser
 
 
@@ -116,6 +156,17 @@ def merge_cli_with_env(args: argparse.Namespace) -> AppConfig:
         config.num_beams = args.num_beams
     if args.skip_url_like is not None:
         config.skip_url_like = args.skip_url_like
+
+    if args.enable_qe is not None:
+        config.enable_qe = args.enable_qe
+    if args.qe_backend is not None:
+        config.qe_backend = args.qe_backend
+    if args.qe_model_name is not None:
+        config.qe_model_name = args.qe_model_name
+    if args.qe_high_threshold is not None:
+        config.qe_high_threshold = args.qe_high_threshold
+    if args.qe_medium_threshold is not None:
+        config.qe_medium_threshold = args.qe_medium_threshold
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
