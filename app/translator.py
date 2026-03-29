@@ -3,9 +3,12 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 
 import torch
 from transformers import MarianMTModel, MarianTokenizer
+
+from app.chunk_merger import ChunkMerger
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +78,8 @@ class OpusTranslator:
         self.model = MarianMTModel.from_pretrained(self.model_name)
         self.model.to(self.device)
         self.model.eval()
+
+        self.chunk_merger = ChunkMerger()
 
         logger.info("Translator initialized successfully")
 
@@ -461,7 +466,7 @@ class OpusTranslator:
         elapsed = time.perf_counter() - start_time
 
         if chunk_overlap_tokens > 0:
-            translated_text = self._merge_translated_chunks(translated_chunks)
+            translated_text = self.chunk_merger.merge_translated_chunks(translated_chunks)
         else:
             translated_text = " ".join(
                 chunk for chunk in translated_chunks if chunk

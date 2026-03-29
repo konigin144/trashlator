@@ -3,16 +3,18 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "phish-translator"
+name = "trashlator"
 version = "0.1.0"
-description = "Batch translation pipeline for phishing and legit text datasets"
+description = "Robust machine translation pipeline for noisy, deception and phishing-like text."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "emoji>=2.12.0,<3.0.0",
     "pandas>=2.2.0,<3.0.0",
+    "sentencepiece>=0.2.0,<1.0.0",
     "torch>=2.2.0,<3.0.0",
     "transformers>=4.40.0,<5.0.0",
+    "unbabel-comet>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -20,10 +22,14 @@ dev = [
     "pytest>=8.0.0,<9.0.0",
 ]
 
+[project.scripts]
+trashlator = "app.cli:main"
+trashlator-sample = "utils.sample_cli:main"
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-v"
 
 [tool.setuptools]
-packages = ["app"]
+packages = ["app", "utils"]
