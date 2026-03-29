@@ -197,7 +197,7 @@ class AppConfig:
             raise ValueError("num_beams must be greater than 0.")
 
         if self.enable_qe:
-            supported_qe_backends = {"transquest"}
+            supported_qe_backends = {"transquest", "comet"}
 
             if not self.qe_backend:
                 raise ValueError("qe_backend must be provided when enable_qe is true.")

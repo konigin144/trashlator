@@ -5,6 +5,7 @@ from typing import Optional
 from qe.base import QEBackend
 from qe.result import QEResult
 from qe.transquest_backend import TransQuestBackend
+from qe.comet_backend import CometBackend
 
 
 class QEService:
@@ -22,6 +23,14 @@ class QEService:
     ) -> "QEService":
         if not enable_qe:
             return cls(backend=None)
+        
+        supported_backends = {"transquest", "comet"}
+
+        if qe_backend not in supported_backends:
+            raise ValueError(
+                f"Unsupported QE backend '{qe_backend}'. "
+                f"Supported: {sorted(supported_backends)}"
+            )
 
         if qe_backend == "transquest":
             if not qe_model_name:
@@ -34,8 +43,18 @@ class QEService:
                     medium_threshold=qe_medium_threshold,
                 )
             )
+        
+        if qe_backend == "comet":
+            if not qe_model_name:
+                raise ValueError("QE model name required for COMET backend.")
 
-        raise ValueError(f"Unsupported QE backend: {qe_backend}")
+            return cls(
+                backend=CometBackend(
+                    model_name=qe_model_name,
+                    high_threshold=qe_high_threshold,
+                    medium_threshold=qe_medium_threshold,
+                )
+            )
 
     def score(self, source_text: str, translated_text: str) -> QEResult:
         if self.backend is None:
