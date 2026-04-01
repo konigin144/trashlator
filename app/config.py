@@ -59,7 +59,7 @@ class AppConfig:
     target_lang: str | None = None
     report_path: Path | None = None
 
-    max_input_length: int = 512
+    max_input_length: int = 256
     chunk_token_limit: int = 160
     max_new_tokens: int = 512
     chunk_overlap_tokens: int = 0
@@ -107,7 +107,7 @@ class AppConfig:
         report_path_env = os.getenv("REPORT_PATH")
         report_path = Path(report_path_env) if report_path_env else None
 
-        max_input_length = _get_env_int("MAX_INPUT_LENGTH", 512)
+        max_input_length = _get_env_int("MAX_INPUT_LENGTH", 256)
         chunk_token_limit = _get_env_int("CHUNK_TOKEN_LIMIT", 160)
         max_new_tokens = _get_env_int("MAX_NEW_TOKENS", 512)
         chunk_overlap_tokens = _get_env_int("CHUNK_OVERLAP_TOKENS", 0)

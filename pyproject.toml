@@ -25,6 +25,7 @@ dev = [
 [project.scripts]
 trashlator = "app.cli:main"
 trashlator-sample = "utils.sample_cli:main"
+trashlator-output-to-sample = "utils.output_to_sample_cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

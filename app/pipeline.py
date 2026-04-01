@@ -24,6 +24,37 @@ def _chunk_indices(indices: list[int], batch_size: int) -> list[list[int]]:
     return [indices[i:i + batch_size] for i in range(0, len(indices), batch_size)]
 
 
+def _translate_single_text_with_limit(
+    *,
+    translator: OpusTranslator,
+    text: str,
+    max_input_length: int,
+    chunk_token_limit: int,
+    chunk_overlap_tokens: int,
+) -> tuple[str, str, int]:
+    original_max_input_length = translator.max_input_length
+    translator.max_input_length = max_input_length
+
+    try:
+        length_check = translator.check_input_length(text)
+        if length_check.is_too_long:
+            chunked_result = translator.translate_long_text(
+                text,
+                chunk_token_limit=chunk_token_limit,
+                chunk_overlap_tokens=chunk_overlap_tokens,
+            )
+            return (
+                chunked_result.translated_text,
+                "ok_chunked",
+                chunked_result.chunk_count,
+            )
+
+        translated_text = translator.translate_batch([text])[0]
+        return translated_text, "ok", 0
+    finally:
+        translator.max_input_length = original_max_input_length
+
+
 def run_pipeline(config: AppConfig) -> None:
     start_time = time.perf_counter()
 
@@ -227,6 +258,60 @@ def run_pipeline(config: AppConfig) -> None:
         )
         for i in range(len(texts))
     ]
+
+    retry_max_input_length = max(1, int(config.max_input_length * 0.5))
+
+    for i, validation_result in enumerate(validation_results):
+        if validation_result.status != "placeholder_mismatch":
+            continue
+
+        logger.info(
+            "Retrying translation for row %d after placeholder_mismatch with max_input_length=%d",
+            i,
+            retry_max_input_length,
+        )
+
+        try:
+            retried_text, retried_status, retried_chunk_count = _translate_single_text_with_limit(
+                translator=translator,
+                text=masked_texts[i],
+                max_input_length=retry_max_input_length,
+                chunk_token_limit=config.chunk_token_limit,
+                chunk_overlap_tokens=config.chunk_overlap_tokens,
+            )
+            translated_texts[i] = unmask_emojis(
+                retried_text,
+                emoji_replacements[i],
+            )
+            was_chunked[i] = retried_status == "ok_chunked"
+            chunk_counts[i] = retried_chunk_count
+            precomputed_statuses[i] = retried_status
+            precomputed_errors[i] = None
+            validation_results[i] = validate_translation(
+                source_text=texts[i],
+                translated_text=translated_texts[i],
+                precomputed_status=precomputed_statuses[i],
+                precomputed_error_message=precomputed_errors[i],
+            )
+        except Exception as exc:
+            logger.exception(
+                "Retry translation failed for row %d after placeholder_mismatch",
+                i,
+            )
+            precomputed_statuses[i] = "translation_error"
+            precomputed_errors[i] = (
+                "Retry translation failed after placeholder_mismatch: "
+                f"{exc}"
+            )
+            translated_texts[i] = None
+            was_chunked[i] = False
+            chunk_counts[i] = 0
+            validation_results[i] = validate_translation(
+                source_text=texts[i],
+                translated_text=translated_texts[i],
+                precomputed_status=precomputed_statuses[i],
+                precomputed_error_message=precomputed_errors[i],
+            )
 
     validation_summary = summarize_validation(validation_results)
     logger.info("Validation summary: %s", validation_summary)
