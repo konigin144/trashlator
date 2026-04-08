@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 
 import torch
 from transformers import MarianMTModel, MarianTokenizer
@@ -264,6 +263,65 @@ class OpusTranslator:
 
         return chunks
 
+    def _split_token_ids_into_chunks(
+        self,
+        *,
+        input_ids: list[int],
+        chunk_token_limit: int,
+        chunk_overlap_tokens: int,
+    ) -> list[TextChunk]:
+        if chunk_token_limit <= 0:
+            raise ValueError("chunk_token_limit must be greater than 0")
+
+        if chunk_overlap_tokens < 0:
+            raise ValueError("chunk_overlap_tokens must be non-negative")
+
+        if chunk_overlap_tokens >= chunk_token_limit:
+            raise ValueError("chunk_overlap_tokens must be smaller than chunk_token_limit")
+
+        if not input_ids:
+            return [TextChunk(text="", start_token=0, end_token=0)]
+
+        if len(input_ids) <= chunk_token_limit:
+            chunk_text = self.tokenizer.decode(
+                input_ids,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            ).strip()
+            return [
+                TextChunk(
+                    text=chunk_text,
+                    start_token=0,
+                    end_token=len(input_ids),
+                )
+            ]
+
+        chunks: list[TextChunk] = []
+        step = chunk_token_limit - chunk_overlap_tokens
+
+        for start in range(0, len(input_ids), step):
+            end = min(start + chunk_token_limit, len(input_ids))
+            chunk_ids = input_ids[start:end]
+            chunk_text = self.tokenizer.decode(
+                chunk_ids,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            ).strip()
+
+            if chunk_text:
+                chunks.append(
+                    TextChunk(
+                        text=chunk_text,
+                        start_token=start,
+                        end_token=end,
+                    )
+                )
+
+            if end >= len(input_ids):
+                break
+
+        return chunks
+
     def split_text_into_token_aware_chunks(
         self,
         text: str,
@@ -272,12 +330,7 @@ class OpusTranslator:
         """
         Split long text into chunks that fit within max_tokens.
 
-        Strategy:
-        1. Build chunks from whitespace-separated segments.
-        2. Keep adding segments while token count stays within the limit.
-        3. If a single segment is too long, fall back to hard token split.
-
-        This is intentionally conservative and suitable for noisy one-line texts.
+        Split long text into non-overlapping chunks by slicing token ids.
         """
         if max_tokens <= 0:
             raise ValueError("max_tokens must be greater than 0")
@@ -286,40 +339,19 @@ class OpusTranslator:
         if not stripped_text:
             return [""]
 
-        if self.get_token_count(stripped_text) <= max_tokens:
-            return [stripped_text]
-
-        segments = stripped_text.split()
-        chunks: list[str] = []
-        current_parts: list[str] = []
-
-        for segment in segments:
-            if not current_parts:
-                if self.get_token_count(segment) <= max_tokens:
-                    current_parts.append(segment)
-                else:
-                    chunks.extend(self._hard_split_by_tokens(segment, max_tokens))
-                continue
-
-            candidate_parts = current_parts + [segment]
-            candidate_text = " ".join(candidate_parts)
-
-            if self.get_token_count(candidate_text) <= max_tokens:
-                current_parts.append(segment)
-                continue
-
-            chunks.append(" ".join(current_parts))
-
-            if self.get_token_count(segment) <= max_tokens:
-                current_parts = [segment]
-            else:
-                chunks.extend(self._hard_split_by_tokens(segment, max_tokens))
-                current_parts = []
-
-        if current_parts:
-            chunks.append(" ".join(current_parts))
-
-        return chunks
+        encoded = self.tokenizer(
+            stripped_text,
+            return_attention_mask=False,
+            return_tensors=None,
+            truncation=False,
+            add_special_tokens=False,
+        )
+        chunks = self._split_token_ids_into_chunks(
+            input_ids=encoded["input_ids"],
+            chunk_token_limit=max_tokens,
+            chunk_overlap_tokens=0,
+        )
+        return [chunk.text for chunk in chunks]
     
     def split_text_into_overlapping_token_chunks(
         self,
@@ -347,43 +379,43 @@ class OpusTranslator:
             truncation=False,
             add_special_tokens=False,
         )
-        input_ids = encoded["input_ids"]
+        return self._split_token_ids_into_chunks(
+            input_ids=encoded["input_ids"],
+            chunk_token_limit=chunk_token_limit,
+            chunk_overlap_tokens=chunk_overlap_tokens,
+        )
 
-        if len(input_ids) <= chunk_token_limit:
-            return [
-                TextChunk(
-                    text=stripped_text,
-                    start_token=0,
-                    end_token=len(input_ids),
-                )
-            ]
+    def split_long_text_into_chunks(
+        self,
+        text: str,
+        *,
+        chunk_token_limit: int | None = None,
+        chunk_overlap_tokens: int = 0,
+    ) -> list[TextChunk]:
+        stripped_text = text.strip()
+        if not stripped_text:
+            return [TextChunk(text="", start_token=0, end_token=0)]
 
-        chunks: list[TextChunk] = []
-        step = chunk_token_limit - chunk_overlap_tokens
+        limit = chunk_token_limit or 160
 
-        for start in range(0, len(input_ids), step):
-            end = min(start + chunk_token_limit, len(input_ids))
-            chunk_ids = input_ids[start:end]
-
-            chunk_text = self.tokenizer.decode(
-                chunk_ids,
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=False,
-            ).strip()
-
-            if chunk_text:
-                chunks.append(
-                    TextChunk(
-                        text=chunk_text,
-                        start_token=start,
-                        end_token=end,
-                    )
-                )
-
-            if end >= len(input_ids):
-                break
-
-        return chunks
+        if chunk_overlap_tokens > 0:
+            return self.split_text_into_overlapping_token_chunks(
+                stripped_text,
+                chunk_token_limit=limit,
+                chunk_overlap_tokens=chunk_overlap_tokens,
+            )
+        encoded = self.tokenizer(
+            stripped_text,
+            return_attention_mask=False,
+            return_tensors=None,
+            truncation=False,
+            add_special_tokens=False,
+        )
+        return self._split_token_ids_into_chunks(
+            input_ids=encoded["input_ids"],
+            chunk_token_limit=limit,
+            chunk_overlap_tokens=0,
+        )
     
     def _merge_translated_chunks(self, translated_chunks: list[str]) -> str:
         if not translated_chunks:
@@ -415,6 +447,19 @@ class OpusTranslator:
 
         return merged.strip()
 
+    def merge_long_text_chunks(
+        self,
+        translated_chunks: list[str],
+        *,
+        chunk_overlap_tokens: int = 0,
+    ) -> str:
+        if chunk_overlap_tokens > 0:
+            return self.chunk_merger.merge_translated_chunks(translated_chunks)
+
+        return " ".join(
+            chunk for chunk in translated_chunks if chunk
+        ).strip()
+
     def translate_long_text(
         self,
         text: str,
@@ -431,18 +476,12 @@ class OpusTranslator:
 
         limit = chunk_token_limit or 160
 
-        if chunk_overlap_tokens > 0:
-            chunks = self.split_text_into_overlapping_token_chunks(
-                stripped_text,
-                chunk_token_limit=limit,
-                chunk_overlap_tokens=chunk_overlap_tokens,
-            )
-            chunk_texts = [chunk.text for chunk in chunks]
-        else:
-            chunk_texts = self.split_text_into_token_aware_chunks(
-                stripped_text,
-                max_tokens=limit,
-            )
+        chunks = self.split_long_text_into_chunks(
+            stripped_text,
+            chunk_token_limit=limit,
+            chunk_overlap_tokens=chunk_overlap_tokens,
+        )
+        chunk_texts = [chunk.text for chunk in chunks]
 
         logger.info(
             "Long text split into %d chunks (chunk_token_limit=%d, chunk_overlap_tokens=%d)",
@@ -452,25 +491,20 @@ class OpusTranslator:
         )
 
         start_time = time.perf_counter()
-        translated_chunks: list[str] = []
-
-        for chunk_idx, chunk in enumerate(chunk_texts, start=1):
-            logger.debug(
-                "Translating long-text chunk %d/%d",
-                chunk_idx,
-                len(chunk_texts),
-            )
-            translated = self.translate_batch([chunk])[0]
-            translated_chunks.append(translated.strip())
+        logger.debug(
+            "Translating %d long-text chunks in a single batch",
+            len(chunk_texts),
+        )
+        translated_chunks = [
+            translated.strip()
+            for translated in self.translate_batch(chunk_texts)
+        ]
 
         elapsed = time.perf_counter() - start_time
-
-        if chunk_overlap_tokens > 0:
-            translated_text = self.chunk_merger.merge_translated_chunks(translated_chunks)
-        else:
-            translated_text = " ".join(
-                chunk for chunk in translated_chunks if chunk
-            ).strip()
+        translated_text = self.merge_long_text_chunks(
+            translated_chunks,
+            chunk_overlap_tokens=chunk_overlap_tokens,
+        )
 
         return ChunkedTranslationResult(
             translated_text=translated_text,

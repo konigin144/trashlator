@@ -137,31 +137,23 @@ def test_split_text_into_token_aware_chunks_raises_for_non_positive_max_tokens()
 
 def test_split_text_into_token_aware_chunks_returns_single_chunk_when_text_fits() -> None:
     translator = OpusTranslator.__new__(OpusTranslator)
-    translator.get_token_count = MagicMock(return_value=3)
+    translator.tokenizer = MagicMock()
+    translator.tokenizer.return_value = {"input_ids": [1, 2, 3]}
+    translator.tokenizer.decode.return_value = "hello world"
 
     result = translator.split_text_into_token_aware_chunks("hello world", max_tokens=10)
 
     assert result == ["hello world"]
 
 
-def test_split_text_into_token_aware_chunks_splits_by_spaces_using_token_limit() -> None:
+def test_split_text_into_token_aware_chunks_slices_token_ids_using_token_limit() -> None:
     translator = OpusTranslator.__new__(OpusTranslator)
-
-    token_counts = {
-        "alpha beta gamma delta epsilon": 12,
-        "alpha": 2,
-        "beta": 2,
-        "gamma": 2,
-        "delta": 2,
-        "epsilon": 2,
-        "alpha beta": 4,
-        "alpha beta gamma": 6,
-        "alpha beta gamma delta": 8,
-        "alpha beta gamma delta epsilon": 10,
-        "delta epsilon": 4,
-    }
-
-    translator.get_token_count = MagicMock(side_effect=lambda text: token_counts[text])
+    translator.tokenizer = MagicMock()
+    translator.tokenizer.return_value = {"input_ids": [10, 11, 12, 13, 14]}
+    translator.tokenizer.decode.side_effect = [
+        "alpha beta gamma",
+        "delta epsilon",
+    ]
 
     result = translator.split_text_into_token_aware_chunks(
         "alpha beta gamma delta epsilon",
@@ -171,28 +163,22 @@ def test_split_text_into_token_aware_chunks_splits_by_spaces_using_token_limit()
     assert result == ["alpha beta gamma", "delta epsilon"]
 
 
-def test_split_text_into_token_aware_chunks_uses_hard_split_for_single_oversized_segment() -> None:
+def test_split_text_into_token_aware_chunks_decodes_non_overlapping_token_windows() -> None:
     translator = OpusTranslator.__new__(OpusTranslator)
-
-    def fake_get_token_count(text: str) -> int:
-        if text == "hugeblob":
-            return 20
-        if text == "tiny":
-            return 1
-        if text == "hugeblob tiny":
-            return 21
-        raise AssertionError(f"Unexpected text: {text}")
-
-    translator.get_token_count = MagicMock(side_effect=fake_get_token_count)
-    translator._hard_split_by_tokens = MagicMock(return_value=["huge", "blob"])
+    translator.tokenizer = MagicMock()
+    translator.tokenizer.return_value = {"input_ids": [1, 2, 3, 4, 5, 6, 7]}
+    translator.tokenizer.decode.side_effect = [
+        "one two three",
+        "four five six",
+        "seven",
+    ]
 
     result = translator.split_text_into_token_aware_chunks(
-        "hugeblob tiny",
-        max_tokens=5,
+        "one two three four five six seven",
+        max_tokens=3,
     )
 
-    assert result == ["huge", "blob", "tiny"]
-    translator._hard_split_by_tokens.assert_called_once_with("hugeblob", 5)
+    assert result == ["one two three", "four five six", "seven"]
 
 
 def test_translate_long_text_returns_empty_result_for_blank_input() -> None:
@@ -210,16 +196,17 @@ def test_translate_long_text_returns_empty_result_for_blank_input() -> None:
 def test_translate_long_text_translates_each_chunk_and_joins_results() -> None:
     translator = OpusTranslator.__new__(OpusTranslator)
     translator.max_input_length = 512
-    translator.split_text_into_token_aware_chunks = MagicMock(
-        return_value=["part one", "part two", "part three"]
-    )
-    translator.translate_batch = MagicMock(
-        side_effect=[
-            ["eins"],
-            ["zwei"],
-            ["drei"],
+    translator.split_long_text_into_chunks = MagicMock(
+        return_value=[
+            SimpleNamespace(text="part one"),
+            SimpleNamespace(text="part two"),
+            SimpleNamespace(text="part three"),
         ]
     )
+    translator.translate_batch = MagicMock(
+        return_value=["eins", "zwei", "drei"]
+    )
+    translator.merge_long_text_chunks = MagicMock(return_value="eins zwei drei")
 
     result = translator.translate_long_text(
         "very long input",
@@ -230,24 +217,36 @@ def test_translate_long_text_translates_each_chunk_and_joins_results() -> None:
     assert result.chunk_count == 3
     assert result.elapsed_seconds >= 0.0
 
-    translator.split_text_into_token_aware_chunks.assert_called_once_with(
+    translator.split_long_text_into_chunks.assert_called_once_with(
         "very long input",
-        max_tokens=128,
+        chunk_token_limit=128,
+        chunk_overlap_tokens=0,
+    )
+    translator.translate_batch.assert_called_once_with(
+        ["part one", "part two", "part three"]
+    )
+    translator.merge_long_text_chunks.assert_called_once_with(
+        ["eins", "zwei", "drei"],
+        chunk_overlap_tokens=0,
     )
 
 
 def test_translate_long_text_uses_default_chunk_token_limit_when_not_provided() -> None:
     translator = OpusTranslator.__new__(OpusTranslator)
     translator.max_input_length = 200
-    translator.split_text_into_token_aware_chunks = MagicMock(return_value=["chunk"])
+    translator.split_long_text_into_chunks = MagicMock(
+        return_value=[SimpleNamespace(text="chunk")]
+    )
     translator.translate_batch = MagicMock(return_value=["translated"])
+    translator.merge_long_text_chunks = MagicMock(return_value="translated")
 
     result = translator.translate_long_text("long text")
 
     assert result.translated_text == "translated"
     assert result.chunk_count == 1
 
-    translator.split_text_into_token_aware_chunks.assert_called_once_with(
+    translator.split_long_text_into_chunks.assert_called_once_with(
         "long text",
-        max_tokens=160,
+        chunk_token_limit=160,
+        chunk_overlap_tokens=0,
     )

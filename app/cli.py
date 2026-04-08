@@ -29,8 +29,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--log-file", dest="log_file", type=Path, help="Optional log file path.")
     parser.add_argument("--report", dest="report_path", type=Path, help="Optional report JSON path.")
+    parser.add_argument("--progress-file", dest="progress_path", type=Path, help="Optional progress-state JSON path.")
     parser.add_argument("--source-lang", dest="source_lang", type=str, help="Source language code.")
     parser.add_argument("--target-lang", dest="target_lang", type=str, help="Target language code.")
+    parser.add_argument(
+        "--input-chunk-size",
+        dest="input_chunk_size",
+        type=int,
+        help="Number of input rows to stream into memory at once.",
+    )
 
     parser.add_argument(
         "--max-input-length",
@@ -75,6 +82,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not skip translation for URL-like records.",
     )
     parser.set_defaults(skip_url_like=None)
+    parser.add_argument(
+        "--sort-batches-by-length",
+        dest="sort_batches_by_length",
+        action="store_true",
+        help="Group normal translation batches by token length.",
+    )
+    parser.add_argument(
+        "--no-sort-batches-by-length",
+        dest="sort_batches_by_length",
+        action="store_false",
+        help="Keep normal translation batches in input order.",
+    )
+    parser.set_defaults(sort_batches_by_length=None)
+    parser.add_argument(
+        "--retry-placeholder-mismatch",
+        dest="retry_placeholder_mismatch",
+        action="store_true",
+        help="Retry translation with lower max_input_length after placeholder mismatch.",
+    )
+    parser.add_argument(
+        "--no-retry-placeholder-mismatch",
+        dest="retry_placeholder_mismatch",
+        action="store_false",
+        help="Do not retry translation after placeholder mismatch.",
+    )
+    parser.set_defaults(retry_placeholder_mismatch=None)
+    parser.add_argument(
+        "--checkpoint-interval",
+        dest="checkpoint_interval",
+        type=int,
+        help="Number of finalized rows between output checkpoints.",
+    )
+    parser.add_argument(
+        "--max-translate-tokens",
+        dest="max_translate_tokens",
+        type=int,
+        help="Skip translation for rows exceeding this token count.",
+    )
+    parser.add_argument(
+        "--batch-token-budget",
+        dest="batch_token_budget",
+        type=int,
+        help="Maximum summed token count for a normal translation batch.",
+    )
 
     parser.add_argument(
         "--enable-qe",
@@ -140,10 +191,14 @@ def merge_cli_with_env(args: argparse.Namespace) -> AppConfig:
         config.log_file = args.log_file
     if args.report_path is not None:
         config.report_path = args.report_path
+    if args.progress_path is not None:
+        config.progress_path = args.progress_path
     if args.source_lang is not None:
         config.source_lang = args.source_lang
     if args.target_lang is not None:
         config.target_lang = args.target_lang
+    if args.input_chunk_size is not None:
+        config.input_chunk_size = args.input_chunk_size
     if args.max_input_length is not None:
         config.max_input_length = args.max_input_length
     if args.max_new_tokens is not None:
@@ -156,6 +211,16 @@ def merge_cli_with_env(args: argparse.Namespace) -> AppConfig:
         config.num_beams = args.num_beams
     if args.skip_url_like is not None:
         config.skip_url_like = args.skip_url_like
+    if args.sort_batches_by_length is not None:
+        config.sort_batches_by_length = args.sort_batches_by_length
+    if args.retry_placeholder_mismatch is not None:
+        config.retry_placeholder_mismatch = args.retry_placeholder_mismatch
+    if args.checkpoint_interval is not None:
+        config.checkpoint_interval = args.checkpoint_interval
+    if args.max_translate_tokens is not None:
+        config.max_translate_tokens = args.max_translate_tokens
+    if args.batch_token_budget is not None:
+        config.batch_token_budget = args.batch_token_budget
 
     if args.enable_qe is not None:
         config.enable_qe = args.enable_qe
@@ -175,6 +240,10 @@ def merge_cli_with_env(args: argparse.Namespace) -> AppConfig:
 
     if config.report_path is None:
         config.report_path = Path("logs") / f"run_report_{timestamp}.json"
+    if config.progress_path is None:
+        config.progress_path = config.output_path.with_name(
+            f"{config.output_path.stem}.progress.json"
+        )
 
     return config
 

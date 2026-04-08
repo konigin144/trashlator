@@ -138,6 +138,23 @@ def test_validate_translation_respects_precomputed_skipped_url_like_status() -> 
     assert result.error_message == "Record looks like a URL-like string and was skipped."
 
 
+def test_validate_translation_respects_precomputed_skipped_max_translate_tokens_status() -> None:
+    source = "very long text"
+
+    result = validate_translation(
+        source_text=source,
+        translated_text=None,
+        precomputed_status="skipped_max_translate_tokens",
+        precomputed_error_message="Record exceeds max_translate_tokens limit.",
+    )
+
+    assert result.status == "skipped_max_translate_tokens"
+    assert result.placeholder_ok is True
+    assert result.source_placeholders == []
+    assert result.target_placeholders == []
+    assert result.error_message == "Record exceeds max_translate_tokens limit."
+
+
 def test_validate_translation_respects_precomputed_ok_chunked_status() -> None:
     source = "hello <PERSON> verify account"
     target = "hallo <PERSON> konto prüfen"
@@ -185,6 +202,7 @@ def test_summarize_validation_counts_statuses_correctly() -> None:
     assert summary["skipped_url_like"] == 1
     assert summary["translation_error"] == 1
     assert summary["placeholder_mismatch"] == 0
+    assert summary["skipped_max_translate_tokens"] == 0
 
 
 def test_summarize_validation_counts_ok_chunked_status() -> None:

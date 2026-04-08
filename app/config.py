@@ -58,6 +58,7 @@ class AppConfig:
     source_lang: str | None = None
     target_lang: str | None = None
     report_path: Path | None = None
+    progress_path: Path | None = None
 
     max_input_length: int = 256
     chunk_token_limit: int = 160
@@ -65,6 +66,12 @@ class AppConfig:
     chunk_overlap_tokens: int = 0
     num_beams: int = 1
     skip_url_like: bool = True
+    sort_batches_by_length: bool = False
+    retry_placeholder_mismatch: bool = True
+    checkpoint_interval: int = 50
+    max_translate_tokens: int | None = 1024
+    batch_token_budget: int = 4096
+    input_chunk_size: int = 5000
 
     text_column: str = "message"
     label_column: str = "label"
@@ -106,6 +113,8 @@ class AppConfig:
 
         report_path_env = os.getenv("REPORT_PATH")
         report_path = Path(report_path_env) if report_path_env else None
+        progress_path_env = os.getenv("PROGRESS_PATH")
+        progress_path = Path(progress_path_env) if progress_path_env else None
 
         max_input_length = _get_env_int("MAX_INPUT_LENGTH", 256)
         chunk_token_limit = _get_env_int("CHUNK_TOKEN_LIMIT", 160)
@@ -113,6 +122,17 @@ class AppConfig:
         chunk_overlap_tokens = _get_env_int("CHUNK_OVERLAP_TOKENS", 0)
         num_beams = _get_env_int("NUM_BEAMS", 1)
         skip_url_like = _get_env_bool("SKIP_URL_LIKE", True)
+        sort_batches_by_length = _get_env_bool("SORT_BATCHES_BY_LENGTH", False)
+        retry_placeholder_mismatch = _get_env_bool("RETRY_PLACEHOLDER_MISMATCH", True)
+        checkpoint_interval = _get_env_int("CHECKPOINT_INTERVAL", 50)
+        max_translate_tokens_env = os.getenv("MAX_TRANSLATE_TOKENS")
+        max_translate_tokens = (
+            int(max_translate_tokens_env)
+            if max_translate_tokens_env
+            else 1024
+        )
+        batch_token_budget = _get_env_int("BATCH_TOKEN_BUDGET", 4096)
+        input_chunk_size = _get_env_int("INPUT_CHUNK_SIZE", 5000)
 
         enable_qe = _get_env_bool("ENABLE_QE", False)
 
@@ -139,12 +159,19 @@ class AppConfig:
             source_lang=source_lang,
             target_lang=target_lang,
             report_path=report_path,
+            progress_path=progress_path,
             max_input_length=max_input_length,
             chunk_token_limit=chunk_token_limit,
             max_new_tokens=max_new_tokens,
             chunk_overlap_tokens=chunk_overlap_tokens,
             num_beams=num_beams,
             skip_url_like=skip_url_like,
+            sort_batches_by_length=sort_batches_by_length,
+            retry_placeholder_mismatch=retry_placeholder_mismatch,
+            checkpoint_interval=checkpoint_interval,
+            max_translate_tokens=max_translate_tokens,
+            batch_token_budget=batch_token_budget,
+            input_chunk_size=input_chunk_size,
             enable_qe=enable_qe,
             qe_backend=qe_backend,
             qe_model_name=qe_model_name,
@@ -220,6 +247,18 @@ class AppConfig:
                     "qe_medium_threshold must not be greater than qe_high_threshold."
                 )
 
+        if self.checkpoint_interval <= 0:
+            raise ValueError("checkpoint_interval must be greater than 0.")
+
+        if self.max_translate_tokens is not None and self.max_translate_tokens <= 0:
+            raise ValueError("max_translate_tokens must be greater than 0 if provided.")
+
+        if self.batch_token_budget <= 0:
+            raise ValueError("batch_token_budget must be greater than 0.")
+
+        if self.input_chunk_size <= 0:
+            raise ValueError("input_chunk_size must be greater than 0.")
+
     def ensure_output_dirs(self) -> None:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -228,3 +267,6 @@ class AppConfig:
 
         if self.report_path is not None:
             self.report_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if self.progress_path is not None:
+            self.progress_path.parent.mkdir(parents=True, exist_ok=True)

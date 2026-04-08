@@ -73,6 +73,15 @@ def validate_translation(
             error_message=precomputed_error_message or "Record looks like a URL and was skipped.",
         )
 
+    if precomputed_status == "skipped_max_translate_tokens":
+        return ValidationResult(
+            status="skipped_max_translate_tokens",
+            placeholder_ok=True,
+            source_placeholders=source_placeholders,
+            target_placeholders=[],
+            error_message=precomputed_error_message or "Record exceeds max_translate_tokens limit.",
+        )
+
     if translated_text is None:
         translated_text = ""
 
@@ -125,6 +134,7 @@ def summarize_validation(results: list[ValidationResult]) -> dict[str, int]:
         "too_long_for_model": 0,
         "translation_error": 0,
         "skipped_url_like": 0,
+        "skipped_max_translate_tokens": 0,
     }
 
     for result in results:
