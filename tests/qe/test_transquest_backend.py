@@ -1,4 +1,5 @@
 from qe.transquest_backend import TransQuestBackend
+from qe.service import QEService
 
 
 def test_transquest_backend_returns_error_for_empty_input():
@@ -84,3 +85,17 @@ def test_transquest_backend_returns_error_when_prediction_fails(monkeypatch):
     assert result.score is None
     assert result.label is None
     assert "prediction exploded" in result.error
+
+
+def test_qe_service_rejects_disabled_transquest_backend():
+    try:
+        QEService.from_config(
+            enable_qe=True,
+            qe_backend="transquest",
+            qe_model_name="some-model",
+        )
+    except ValueError as exc:
+        assert "currently disabled" in str(exc)
+        assert "future development" in str(exc)
+    else:
+        raise AssertionError("Expected transquest backend to be rejected")

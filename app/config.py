@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from qe.service import DISABLED_QE_BACKENDS, SUPPORTED_QE_BACKENDS
+
 
 def _get_env_str(name: str, default: str) -> str:
     value = os.getenv(name)
@@ -224,14 +226,15 @@ class AppConfig:
             raise ValueError("num_beams must be greater than 0.")
 
         if self.enable_qe:
-            supported_qe_backends = {"transquest", "comet"}
-
             if not self.qe_backend:
                 raise ValueError("qe_backend must be provided when enable_qe is true.")
 
-            if self.qe_backend not in supported_qe_backends:
+            if self.qe_backend in DISABLED_QE_BACKENDS:
+                raise ValueError(DISABLED_QE_BACKENDS[self.qe_backend])
+
+            if self.qe_backend not in SUPPORTED_QE_BACKENDS:
                 raise ValueError(
-                    f"qe_backend must be one of: {sorted(supported_qe_backends)}"
+                    f"qe_backend must be one of: {sorted(SUPPORTED_QE_BACKENDS)}"
                 )
 
             if not self.qe_model_name:

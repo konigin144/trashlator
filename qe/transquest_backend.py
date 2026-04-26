@@ -8,6 +8,8 @@ from qe.result import QEResult
 
 class TransQuestBackend(QEBackend):
     """
+    ### NOT SUPPORTED ###
+
     POC backend for sentence-level QE using TransQuest.
 
     Notes:

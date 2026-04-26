@@ -145,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--qe-backend",
         dest="qe_backend",
         type=str,
-        choices=["transquest", "comet"],
+        choices=["comet"],
         help="QE backend to use.",
     )
     parser.add_argument(
