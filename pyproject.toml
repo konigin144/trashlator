@@ -29,6 +29,7 @@ dev = [
 trashlator = "app.cli:main"
 trashlator-sample = "utils.sample_cli:main"
 trashlator-output-to-sample = "utils.output_to_sample_cli:main"
+trashlator-qe = "utils.qe_runner_cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
